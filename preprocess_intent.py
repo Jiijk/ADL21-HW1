@@ -112,7 +112,7 @@ def parse_args() -> Namespace:
         type=Path,
         help="Directory to save the processed file.",
         default="./cache/intent/",
-    )
+    )0
     parser.add_argument(
         "--vocab_size",
         type=int,
