@@ -41,40 +41,38 @@ tag2idx: Dict[str, int] = json.loads(tag_idx_path.read_text())
 tokens = {}
 labels = {}
 sequences = {}
+test_id = []
+test_shape = []
 
-# train_tokens =[]
-# train_tags =[]
-# train_sequences =[]
-# val_tokens =[]
-# val_tags =[]
-# val_sequences =[]
 
-for which_data in ['train','eval']:
+for which_data in ['train','eval','test']:
     with open(data_dir + f"{which_data}.json") as data_f:
         data = json.load(data_f)
-
     tokens[which_data] = [info['tokens'] for info in data]
     sequences[which_data] = [vocab.encode(_tokens) for _tokens in tokens[which_data]]
-    tags_list = [info['tags'] for info in data]
-    labels[which_data] = [[tag2idx[tag] for tag in tags] for tags in tags_list]
-
+    if which_data != 'test':
+        tags_list = [info['tags'] for info in data]
+        labels[which_data] = [[tag2idx[tag] for tag in tags] for tags in tags_list]
+        labels[which_data] = pad_sequences(labels[which_data], padding='post',
+                                        maxlen =max_len,
+                                        value =1, dtype ='int32')
+        labels[which_data] = to_categorical(labels[which_data].reshape(-1,))
+    else:
+        test_shape = [len(info['tokens']) for info in data]
+        test_id = [info['id'] for info in data]
     sequences[which_data] = pad_sequences(sequences[which_data], padding='post', maxlen =max_len,
                                 value =0, dtype ='int32')
-    labels[which_data] = pad_sequences(labels[which_data], padding='post', maxlen =max_len,
-                                value =1, dtype ='int32')
-
     sequences[which_data] = sequences[which_data].reshape(-1,)
-    labels[which_data] = to_categorical(labels[which_data].reshape(-1,))
-
 
 ''' Data Type
-tokens : Dict['train','eval'] =  line by line of each sentences 
+tokens : Dict['train','eval'] =  line by line of each sentences, shape = (927242,) 
 sequences : Dict['train', 'eval'] = line by line of each idx-sentences after padding
         shape = (927232,), class = ndarray
-labels : label, tag -> index of tag(label) -> one hot of index, 
+labels : label, i.e.,  tag -> index of tag(label) -> one hot of index, 
+        e.q. O  -> 1  -> (0,1,0,0,0,0,0,0,0)
         shape = (927232,9), class = ndarray
-'''
 
+'''
 
 # Create the model
 sequence_input = Input(shape=(1,), dtype='int32')
@@ -110,35 +108,26 @@ bid_model.summary()
 history = bid_model.fit(sequences['train'], labels['train'], 
                     epochs =15, batch_size =64, 
                     validation_data=(sequences['train'], labels['train']))
-# Resault :loss: 0.0690 - accuracy: 0.9790 - val_loss: 0.4592 - val_accuracy: 
-# 0.9057
-prediction = bid_model.predict(train_sequences)
-# Presict test data
-test_text =[]
-test_id =[]
-test_sequences =[]
-with open(data_dir + "test.json") as data_f:
-    data = json.load(data_f)
 
-for info in data:
-    test_text.append(info['text'])
-    test_id.append(info['id'])
-    vector = vocab.encode(info['text'].split(' '))
-    test_sequences.append(vector)
-test_sequences = pad_sequences(test_sequences, padding='post', maxlen = max_len)
+# Resault : accuracy: 0.9942 - val_loss: 0.0146 - val_accuracy: 0.9941
 
-predictions = bid_model.predict(test_sequences)
-idx_predictions = np.argmax(predictions, axis=-1)
-intent_predictions = {}
-idx2intent = {idx:intent for intent,idx in intent2idx.items()}
-for n in range(len(idx_predictions)):
-    intent_predictions[test_id[n]] = idx2intent[idx_predictions[n]]
+# Predict test slot
+predictions = bid_model.predict(sequences['test'])
+predictions = np.argmax(predictions, axis=-1)
+predictions = predictions.reshape(len(test_id),-1)
 
-import csv
-with open('predictions.csv', 'w', encoding='UTF8') as f:
-    f.write('id,intent\n')
-    for key in intent_predictions.keys():
-        f.write("%s,%s\n"%(key,intent_predictions[key]))
+slot_predictions = {}
+for n in range(len(predictions)):
+    slot_predictions[test_id[n]] = predictions[n][:test_shape[n]]     
+idx2slot = {idx:intent for intent,idx in tag2idx.items()}
+
+for n in range(len(slot_predictions)):
+    slot_predictions[test_id[n]] = [idx2slot[idx] for idx in slot_predictions[test_id[n]]]
+
+with open('slot_predictions.csv', 'w', encoding='UTF8') as f:
+    f.write('id,tags\n')
+    for key in slot_predictions.keys():
+        f.write("%s,%s\n"%(key,slot_predictions[key]))
 
 
 def parse_args() -> Namespace:
