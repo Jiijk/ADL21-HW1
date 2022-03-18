@@ -1,3 +1,4 @@
+from msilib import sequence
 import pandas as pd
 import csv
 import json
@@ -37,70 +38,41 @@ embeddings = torch.load(cache_dir / "embeddings.pt")
 tag_idx_path = cache_dir / "tag2idx.json"
 tag2idx: Dict[str, int] = json.loads(tag_idx_path.read_text())
 
-with open(data_dir + "train.json") as data_f:
-    data = json.load(data_f)
+tokens = {}
+labels = {}
+sequences = {}
 
-train_tokens =[]
-train_tags =[]
-train_sequences =[]
+# train_tokens =[]
+# train_tags =[]
+# train_sequences =[]
+# val_tokens =[]
+# val_tags =[]
+# val_sequences =[]
 
-for info in data:
-    token = info['tokens']
-    if len(token) > max_len:
-        max_len = len(token)
-    train_tokens.append(token) 
-    train_sequences.append(vocab.encode(token))
-    train_tags.append(info['tags'])
+for which_data in ['train','eval']:
+    with open(data_dir + f"{which_data}.json") as data_f:
+        data = json.load(data_f)
 
-train_labels =[]
-for tags in train_tags:
-    tags_2_idx = [tag2idx[tag] for tag in tags]
-    train_labels.append(tags_2_idx)
+    tokens[which_data] = [info['tokens'] for info in data]
+    sequences[which_data] = [vocab.encode(_tokens) for _tokens in tokens[which_data]]
+    tags_list = [info['tags'] for info in data]
+    labels[which_data] = [[tag2idx[tag] for tag in tags] for tags in tags_list]
 
-train_sequences = pad_sequences(train_sequences, padding='post', maxlen =max_len,
-                            value =0, dtype ='int32')
-train_labels = pad_sequences(train_labels, padding='post', maxlen =max_len,
-                            value =9, dtype ='int32')
+    sequences[which_data] = pad_sequences(sequences[which_data], padding='post', maxlen =max_len,
+                                value =0, dtype ='int32')
+    labels[which_data] = pad_sequences(labels[which_data], padding='post', maxlen =max_len,
+                                value =1, dtype ='int32')
 
-train_sequences_c = [token for token_list in train_sequences for token in token_list]
-train_labels_c = [token for token_list in train_labels for token in token_list]
+    sequences[which_data] = sequences[which_data].reshape(-1,)
+    labels[which_data] = to_categorical(labels[which_data].reshape(-1,))
 
-# Contribution of validation data
-val_tokens =[]
-val_tags =[]
-val_sequences =[]
-with open(data_dir + "eval.json") as data_f:
-    data = json.load(data_f)
-
-for info in data:
-    token = info['tokens']
-    if len(token)>max_len:
-        max_len = len(token)
-    val_tokens.append(token) 
-    val_sequences.append(vocab.encode(token))
-    val_tags.append(info['tags'])
-
-val_labels =[]
-for tags in val_tags:
-    tags_2_idx = [tag2idx[tag] for tag in tags]
-    val_labels.append(tags_2_idx)
-
-
-
-val_sequences = pad_sequences(val_sequences, padding='post', maxlen =max_len,
-                            value =0, dtype ='int32')
-val_labels = pad_sequences(val_labels, padding='post', maxlen =max_len,
-                            value =1, dtype ='int32')
-val_sequences_c = [token for token_list in val_sequences for token in token_list]
-val_sequences_c = np.array(val_sequences_c)
-val_labels_c = [token for token_list in val_labels for token in token_list]
-val_labels_c = np.array(val_labels_c)
 
 ''' Data Type
-train_tokens : list[str] , shape= (7244,)
-train_seqences : np.array, shape = (7244, 35) ,將text出現的word按照出現頻率來編號，
-                編號方式同vocab
-train_labels : list, shape = (7244, 35)
+tokens : Dict['train','eval'] =  line by line of each sentences 
+sequences : Dict['train', 'eval'] = line by line of each idx-sentences after padding
+        shape = (927232,), class = ndarray
+labels : label, tag -> index of tag(label) -> one hot of index, 
+        shape = (927232,9), class = ndarray
 '''
 
 
@@ -124,8 +96,9 @@ x = Dropout(0.1)(x)
 x = GlobalMaxPool1D()(x)
 x = Dense(50, activation="relu")(x)
 x = Dropout(0.1)(x)
-preds = Dense(10, activation="sigmoid")(x)
-x = Dropout(0.1)(x)
+preds = Dense(9, activation="sigmoid")(x)
+
+
 bid_model = Model(sequence_input, preds)
 bid_model.compile(loss = 'categorical_crossentropy',
              optimizer='adam',
@@ -134,13 +107,9 @@ bid_model.summary()
 
 
 # Model training
-train_labels_c_cate = to_categorical(train_labels_c, num_classes=10)
-train_sequences_c= np.array(train_sequences_c)
-val_labels_c_cate = to_categorical(val_labels_c, num_classes=10)
-# train_labels_cate = train_labels_c_cate.reshape(7244,-1)
-history = bid_model.fit(train_sequences_c, train_labels_c_cate, 
+history = bid_model.fit(sequences['train'], labels['train'], 
                     epochs =15, batch_size =64, 
-                    validation_data=(val_sequences_c, val_labels_c_cate))
+                    validation_data=(sequences['train'], labels['train']))
 # Resault :loss: 0.0690 - accuracy: 0.9790 - val_loss: 0.4592 - val_accuracy: 
 # 0.9057
 prediction = bid_model.predict(train_sequences)
