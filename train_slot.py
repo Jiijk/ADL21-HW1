@@ -1,21 +1,13 @@
-from pyexpat import model
-import pandas as pd
-import csv
 import json
 import pickle
-from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from typing import Dict
 import torch
 from tqdm import trange
 from utils import Vocab
 import numpy as np
-import tensorflow as tf
-from tensorflow.keras import Input
 from tensorflow.keras.preprocessing.sequence import pad_sequences
-from keras.utils.np_utils import to_categorical
-from tensorflow.keras.layers import Bidirectional, Embedding, LSTM, Dense, Dropout,GlobalMaxPool1D
-from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.models import load_model
 import sys
 import os.path
 
@@ -31,6 +23,14 @@ data_dir = "./data/slot/"
 max_len = 128
 embedding_dim = 300
 
+with open(cache_dir / "vocab.pkl", "rb") as f:
+    vocab: Vocab = pickle.load(f)
+
+embeddings = torch.load(cache_dir / "embeddings.pt")
+
+tag_idx_path = cache_dir / "tag2idx.json"
+tag2idx: Dict[str, int] = json.loads(tag_idx_path.read_text())
+
 # Model Loading
 if os.path.isfile('slot_Bi_LSTM_model.h5') is False:
     print('Cant detect model, please make sure model been downloaded.')
@@ -42,17 +42,9 @@ def main(argv):
     test_data_path = argv[1]
     predictions_labels_path = argv[2]
 
-    with open(cache_dir / "vocab.pkl", "rb") as f:
-        vocab: Vocab = pickle.load(f)
-
-    embeddings = torch.load(cache_dir / "embeddings.pt")
-
-    tag_idx_path = cache_dir / "tag2idx.json"
-    tag2idx: Dict[str, int] = json.loads(tag_idx_path.read_text())
-
-    
     with open(test_data_path) as data_f:
         data = json.load(data_f)
+
     tokens = [info['tokens'] for info in data]
     sequences = [vocab.encode(_tokens) for _tokens in tokens]
     test_shape = [len(info['tokens']) for info in data]
@@ -79,7 +71,7 @@ def main(argv):
     with open(predictions_labels_path, 'w', encoding='UTF8') as f:
         f.write('id,tags\n')
         for key in slot_predictions.keys():
-            f.write("%s,%s "%(key,tag))
+            f.write("%s"%key)
             c = 1
             for tag in slot_predictions[key]:
                 if c != len(slot_predictions[key]):
